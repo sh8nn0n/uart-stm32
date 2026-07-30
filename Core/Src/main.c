@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,16 +40,23 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim6;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+uint8_t tx_data[] = "Hi \r\n";
+uint8_t rx_byte;
 
+uint16_t on = 700;
+uint16_t off = 300;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_TIM6_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -89,20 +96,22 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
-  uint8_t tx_data[] = "Hi \r\n";
-  uint8_t rx_byte;
 
-  HAL_UART_Transmit (&huart2, tx_data, strlen (tx_data), 500);
-  if (HAL_UART_Receive (&huart2, &rx_byte, 1, 500)==HAL_OK){
-	  HAL_UART_Transmit (&huart2, &rx_byte, 1, 500);
-  }
+  HAL_TIM_Base_Start_IT(&htim6);
+  HAL_UART_Transmit (&huart2, tx_data, strlen((char*)tx_data), 5000);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  if (HAL_UART_Receive (&huart2, &rx_byte, 1, 5000)==HAL_OK)
+	  {
+		  HAL_UART_Transmit (&huart2, &rx_byte, 1, 5000);
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -148,6 +157,44 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief TIM6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM6_Init(void)
+{
+
+  /* USER CODE BEGIN TIM6_Init 0 */
+
+  /* USER CODE END TIM6_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM6_Init 1 */
+
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 159;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 699;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM6_Init 2 */
+
+  /* USER CODE END TIM6_Init 2 */
+
 }
 
 /**
@@ -231,7 +278,25 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
 
+	if (htim -> Instance == TIM6)
+	{
+		static uint32_t state = 0;
+		if (state == 0){
+			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+		    __HAL_TIM_SET_AUTORELOAD(htim, on - 1);
+		    __HAL_TIM_SET_COUNTER(htim, 0);
+			state = 1;
+		}
+		else {
+			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+		    __HAL_TIM_SET_AUTORELOAD(htim, off - 1);
+		    __HAL_TIM_SET_COUNTER(htim, 0);
+			state = 0;
+		}
+	}
+}
 /* USER CODE END 4 */
 
 /**
