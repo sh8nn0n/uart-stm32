@@ -90,7 +90,13 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  uint8_t tx_data[] = "Hi \r\n";
+  uint8_t rx_byte;
 
+  HAL_UART_Transmit (&huart2, tx_data, strlen (tx_data), 500);
+  if (HAL_UART_Receive (&huart2, &rx_byte, 1, 500)==HAL_OK){
+	  HAL_UART_Transmit (&huart2, &rx_byte, 1, 500);
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
