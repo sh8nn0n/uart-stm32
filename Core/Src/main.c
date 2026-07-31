@@ -100,6 +100,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   HAL_UART_Transmit (&huart2, tx_data, strlen((char*)tx_data), 1000);
+  HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
 
   /* USER CODE END 2 */
 
@@ -107,11 +108,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (HAL_UART_Receive(&huart2, &rx_byte, 1, 1000) == HAL_OK)
-	    {
-	        HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);
-	        HAL_TIM_Base_Start_IT(&htim6);
-	    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -278,6 +274,17 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
+	if (huart -> Instance == USART2)
+	{
+		HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);		//echo the transmit
+
+		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);			//rearm to tell uart to start listening for the next byte
+		HAL_TIM_Base_Start_IT(&htim6);						//enable the pwm
+	}
+}
+
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
 
 	if (htim -> Instance == TIM6)
