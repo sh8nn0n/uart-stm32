@@ -99,8 +99,7 @@ int main(void)
   MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_TIM_Base_Start_IT(&htim6);
-  HAL_UART_Transmit (&huart2, tx_data, strlen((char*)tx_data), 5000);
+  HAL_UART_Transmit (&huart2, tx_data, strlen((char*)tx_data), 1000);
 
   /* USER CODE END 2 */
 
@@ -108,10 +107,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (HAL_UART_Receive (&huart2, &rx_byte, 1, 5000)==HAL_OK)
-	  {
-		  HAL_UART_Transmit (&huart2, &rx_byte, 1, 5000);
-	  }
+	  if (HAL_UART_Receive(&huart2, &rx_byte, 1, 1000) == HAL_OK)
+	    {
+	        HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);
+	        HAL_TIM_Base_Start_IT(&htim6);
+	    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
