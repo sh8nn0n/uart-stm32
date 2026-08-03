@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,16 +44,20 @@
 TIM_HandleTypeDef htim16;
 
 UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart2_rx;
+DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
 uint8_t tx_data[] = "Hi \r\n";
 uint8_t rx_byte;
+
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
@@ -93,6 +98,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_TIM16_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
@@ -133,7 +139,12 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSIDiv = RCC_HSI_DIV1;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV1;
+  RCC_OscInitStruct.PLL.PLLN = 8;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -143,11 +154,11 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
@@ -172,7 +183,7 @@ static void MX_TIM16_Init(void)
 
   /* USER CODE END TIM16_Init 1 */
   htim16.Instance = TIM16;
-  htim16.Init.Prescaler = 159;
+  htim16.Init.Prescaler = 319;
   htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim16.Init.Period = 699;
   htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -265,6 +276,22 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Ch4_7_DMAMUX1_OVR_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Ch4_7_DMAMUX1_OVR_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Ch4_7_DMAMUX1_OVR_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -293,14 +320,35 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+uint8_t rx_buffer[4] = {0};
+uint8_t rx_index = 0;
+
 void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
 	{
 		HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);		//echo the transmit
+		if (rx_byte == '\r' || rx_byte == '\n')
+		{
+            rx_buffer[rx_index] = '\0';
+            uint16_t value = atoi((char*)rx_buffer);   //"what the user entered"
+            if (value > 100) value = 100;
 
-		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);			//rearm to tell uart to start listening for the next byte
-		HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
-		__HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, 700);
+            uint16_t duty = (value * 699) / 100;      // scaled for your current Period
+
+            static uint8_t pwm_started = 0;
+            if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
+            __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
+
+            uint8_t newline[] = "\r\n";
+            HAL_UART_Transmit(&huart2, newline, 2, 1000);
+
+            rx_index = 0;
+        }
+        else if (rx_index < sizeof(rx_buffer) - 1)
+        {
+            rx_buffer[rx_index++] = rx_byte;   //accumulates what you're typing
+        }
+		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
 	}
 }
 
