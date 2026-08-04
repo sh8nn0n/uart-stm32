@@ -183,7 +183,7 @@ static void MX_TIM16_Init(void)
 
   /* USER CODE END TIM16_Init 1 */
   htim16.Instance = TIM16;
-  htim16.Init.Prescaler = 319;
+  htim16.Init.Prescaler = 159;
   htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim16.Init.Period = 699;
   htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -327,13 +327,13 @@ void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
 	{
 		HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);		//echo the transmit
-		if (rx_byte == '\r' || rx_byte == '\n')
+		if (rx_byte == '\r')
 		{
             rx_buffer[rx_index] = '\0';
             uint16_t value = atoi((char*)rx_buffer);   //"what the user entered"
             if (value > 100) value = 100;
 
-            uint16_t duty = (value * 699) / 100;      // scaled for your current Period
+            uint16_t duty = (value*699)/100;      // scaled for your current Period
 
             static uint8_t pwm_started = 0;
             if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
