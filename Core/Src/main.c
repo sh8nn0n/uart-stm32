@@ -48,9 +48,11 @@ DMA_HandleTypeDef hdma_usart2_rx;
 DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
-uint8_t tx_data[] = "Hi \r\n";
 uint8_t rx_byte;
-
+volatile uint8_t byte_ready = 0;
+uint8_t rx_buffer[4] = {0};
+uint8_t rx_index = 0;
+uint8_t received_LF = 0;
 
 /* USER CODE END PV */
 
@@ -103,7 +105,6 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_UART_Transmit (&huart2, tx_data, strlen((char*)tx_data), 1000);
   HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
 
   /* USER CODE END 2 */
@@ -112,10 +113,55 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  if (byte_ready)
+	  {
+		  byte_ready = 0;
+
+		  if (received_LF)
+		  {
+			  received_LF = 0;
+			  if (rx_byte == '\n')
+			  {
+
+			  }
+			else
+			{
+				if (rx_index < sizeof(rx_buffer) - 1)	//must parse the next set of bytes and not just discard it after one go
+				{
+					rx_buffer[rx_index++] = rx_byte;   //accumulates what you're typing
+				}
+			}
+		  }
+		  else if(rx_byte == '\r')
+			{
+				rx_buffer[rx_index] = '\0';
+				uint16_t value = atoi((char*)rx_buffer);   //"what the user entered"
+				if (value > 100) value = 100;
+
+				uint16_t duty = (value*699)/100;      // scaled for your current Period
+
+				static uint8_t pwm_started = 0;
+				if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
+				__HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
+
+				uint8_t newline[] = "\r\n";
+				HAL_UART_Transmit(&huart2, newline, 2, 1000);
+
+				rx_index = 0;
+				received_LF = 1;
+			}
+		else if (rx_index < sizeof(rx_buffer) - 1)
+		{
+			rx_buffer[rx_index++] = rx_byte;   //accumulates what you're typing
+		}
+
+	  }
+}
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+
   /* USER CODE END 3 */
 }
 
@@ -320,34 +366,13 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-uint8_t rx_buffer[4] = {0};
-uint8_t rx_index = 0;
+
 
 void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
 	{
 		HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);		//echo the transmit
-		if (rx_byte == '\r')
-		{
-            rx_buffer[rx_index] = '\0';
-            uint16_t value = atoi((char*)rx_buffer);   //"what the user entered"
-            if (value > 100) value = 100;
-
-            uint16_t duty = (value*699)/100;      // scaled for your current Period
-
-            static uint8_t pwm_started = 0;
-            if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
-            __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
-
-            uint8_t newline[] = "\r\n";
-            HAL_UART_Transmit(&huart2, newline, 2, 1000);
-
-            rx_index = 0;
-        }
-        else if (rx_index < sizeof(rx_buffer) - 1)
-        {
-            rx_buffer[rx_index++] = rx_byte;   //accumulates what you're typing
-        }
+		byte_ready = 1;
 		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
 	}
 }
