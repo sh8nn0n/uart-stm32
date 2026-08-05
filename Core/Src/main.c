@@ -382,6 +382,7 @@ void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
 	{
 		byte_ready = 1;
+		HAL_UART_Transmit (&huart2, &rx_byte, 1, 1000);
 		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
 	}
 }

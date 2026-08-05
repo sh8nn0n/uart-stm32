@@ -8,4 +8,4 @@
 ../Core/Src/main.c:355:9:hex_pair_to_byte	24	static
 ../Core/Src/main.c:360:6:process_modbus_message	24	static
 ../Core/Src/main.c:381:6:HAL_UART_RxCpltCallback	16	static
-../Core/Src/main.c:397:6:Error_Handler	8	static,ignoring_inline_asm
+../Core/Src/main.c:398:6:Error_Handler	8	static,ignoring_inline_asm
