@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,7 +33,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define MOTOR_PIN GPIO_PIN_5
+#define MOTOR_PORT GPIOB
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,6 +56,9 @@ uint8_t rx_buffer[4] = {0};
 uint8_t rx_index = 0;
 uint8_t received_LF = 0;
 uint8_t ready = 1;
+volatile uint32_t motor_count;
+
+
 
 /* USER CODE END PV */
 
@@ -128,7 +133,27 @@ int main(void)
 
 		uint8_t newline[] = "\r\n";
 		HAL_UART_Transmit(&huart2, newline, 2, 1000);
+
+		  static uint32_t last_check = 0;
+		  uint32_t now = HAL_GetTick();
+		  if (now - last_check >= 1000)
+		  {
+		    uint32_t count = motor_count;
+		    motor_count = 0;
+		    last_check = now;
+
+		    uint32_t rpm = (count * 60) / 6;
+		    const float pi = 3.14159f;
+		    float speed = rpm * ((2.0f*pi)/60.0f);
+
+		    char msg[32];
+		    int len = snprintf(msg, sizeof(msg), "RPM: %lu  Speed: %d.%02d rad/s\r\n",
+		                        (unsigned long)rpm,
+		                        (int)speed, (int)((speed - (int)speed) * 100));
+		    HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, 1000);
+		  }
 	  }
+
   }
  }
 
@@ -137,7 +162,6 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
   /* USER CODE END 3 */
-
 
 /**
   * @brief System Clock Configuration
@@ -327,6 +351,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin : PA5 */
   GPIO_InitStruct.Pin = GPIO_PIN_5;
@@ -334,13 +359,22 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-
 
 void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
@@ -366,18 +400,25 @@ void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 				rx_index = 0;					//reset the index
 				received_LF = 1;				//Received one of the LF, so look out for more
 				ready = 1;						//the ready state is set to true to run the while loop
-			  }
+			}
 			else if (rx_index < sizeof(rx_buffer) - 1)	//keep storing the bytes
 			{
 				rx_buffer[rx_index++] = byte;   //accumulates what you're typing
 			}
 		}
 	}
-
 		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);		//rearms UART for next byte
 }
 
 
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == MOTOR_PIN)
+  {
+	  motor_count++;
+  }
+
+}
 
 /* USER CODE END 4 */
 
