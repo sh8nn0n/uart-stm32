@@ -53,6 +53,7 @@ volatile uint8_t byte_ready = 0;
 uint8_t rx_buffer[4] = {0};
 uint8_t rx_index = 0;
 uint8_t received_LF = 0;
+uint8_t ready = 1;
 
 /* USER CODE END PV */
 
@@ -113,57 +114,30 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (byte_ready)
+	  if (ready)
 	  {
-		  byte_ready = 0;
+		ready = 0;
+		uint16_t value = atoi((char*)rx_buffer);   //"what the user entered"
+		if (value > 100) value = 100;
 
-		  if (received_LF)
-		  {
-			  received_LF = 0;
-			  if (rx_byte == '\n')
-			  {
+		uint16_t duty = (value*699)/100;      // scaled for your current Period
 
-			  }
-			else
-			{
-				if (rx_index < sizeof(rx_buffer) - 1)	//must parse the next set of bytes and not just discard it after one go
-				{
-					rx_buffer[rx_index++] = rx_byte;   //accumulates what you're typing
-				}
-			}
-		  }
-		  else if(rx_byte == '\r')
-			{
-				rx_buffer[rx_index] = '\0';
-				uint16_t value = atoi((char*)rx_buffer);   //"what the user entered"
-				if (value > 100) value = 100;
+		static uint8_t pwm_started = 0;
+		if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
+		__HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
 
-				uint16_t duty = (value*699)/100;      // scaled for your current Period
-
-				static uint8_t pwm_started = 0;
-				if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
-				__HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
-
-				uint8_t newline[] = "\r\n";
-				HAL_UART_Transmit(&huart2, newline, 2, 1000);
-
-				rx_index = 0;
-				received_LF = 1;
-			}
-		else if (rx_index < sizeof(rx_buffer) - 1)
-		{
-			rx_buffer[rx_index++] = rx_byte;   //accumulates what you're typing
-		}
-
+		uint8_t newline[] = "\r\n";
+		HAL_UART_Transmit(&huart2, newline, 2, 1000);
 	  }
-}
+  }
+ }
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 
   /* USER CODE END 3 */
-}
+
 
 /**
   * @brief System Clock Configuration
@@ -371,10 +345,36 @@ static void MX_GPIO_Init(void)
 void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
 	{
+		uint8_t byte = rx_byte;		//copy the newly stored rx_byte into a local variable to store
+
 		HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);		//echo the transmit
-		byte_ready = 1;
-		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
+		byte_ready = 1;			//sets if statement to true
+		if (byte_ready)
+		{
+			if (received_LF)	//check if \n is received
+			{
+			  received_LF = 0;
+			  if (byte == '\n')
+				{
+				  HAL_UART_Receive_IT(&huart2, &rx_byte, 1);		//swallowed the \n which means there's no more data to store
+				  return;			//ignores the rest of the callback and go back to while loop
+				}
+			}
+			if (byte == '\r')		//if \r is detected
+			{
+				rx_buffer[rx_index] = '\0';		//stores the null value to mark the end of the string
+				rx_index = 0;					//reset the index
+				received_LF = 1;				//Received one of the LF, so look out for more
+				ready = 1;						//the ready state is set to true to run the while loop
+			  }
+			else if (rx_index < sizeof(rx_buffer) - 1)	//keep storing the bytes
+			{
+				rx_buffer[rx_index++] = byte;   //accumulates what you're typing
+			}
+		}
 	}
+
+		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);		//rearms UART for next byte
 }
 
 
