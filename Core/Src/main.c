@@ -52,12 +52,12 @@ DMA_HandleTypeDef hdma_usart2_tx;
 /* USER CODE BEGIN PV */
 uint8_t rx_byte;
 volatile uint8_t byte_ready = 0;
-uint8_t rx_buffer[4] = {0};
+uint8_t rx_buffer[32] = {0};
 uint8_t rx_index = 0;
 uint8_t received_LF = 0;
 uint8_t ready = 1;
 volatile uint32_t motor_count;
-
+uint16_t remember = 0;
 
 
 /* USER CODE END PV */
@@ -68,8 +68,11 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_USART2_UART_Init(void);
-/* USER CODE BEGIN PFP */
 
+/* USER CODE BEGIN PFP */
+static void process_message(void);
+uint8_t hex_pair_to_byte(uint8_t high, uint8_t low);
+uint8_t hex_val_to_char(uint8_t c);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -123,6 +126,7 @@ int main(void)
 	  {
 		//calculate pwm speed
 		ready = 0;
+		/*
 		uint16_t value = atoi((char*)rx_buffer);   //"what the user entered"
 		if (value > 100) value = 100;
 
@@ -130,7 +134,9 @@ int main(void)
 
 		static uint8_t pwm_started = 0;
 		if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
-		__HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
+		__HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty); */
+
+		process_message();
 
 		uint8_t newline[] = "\r\n";
 		HAL_UART_Transmit(&huart2, newline, 2, 1000);
@@ -386,6 +392,10 @@ void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 		uint8_t byte = rx_byte;		//copy the newly stored rx_byte into a local variable to store
 
 		HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);		//echo the transmit
+		if (byte == ':')
+		{
+			rx_index = 0;
+		}
 		byte_ready = 1;			//sets if statement to true
 		if (byte_ready)
 		{
@@ -422,6 +432,95 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
 	  motor_count++;
   }
 
+}
+
+
+uint8_t hex_char_to_val(uint8_t c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+uint8_t hex_pair_to_byte(uint8_t high, uint8_t low)
+{
+    return (hex_char_to_val(high) << 4) | hex_char_to_val(low);
+}
+
+uint8_t hex_val_to_char(uint8_t c)
+{
+	if (c >= 0 && c <= 9) return c + '0';
+	if (c >= 10 && c <= 15) return c + 'A' - 10;
+    return 0;
+}
+
+static void process_message(void)
+{
+    if (rx_index < 6) return;
+
+    uint8_t address  = hex_pair_to_byte(rx_buffer[0], rx_buffer[1]);
+    uint8_t function = hex_pair_to_byte(rx_buffer[2], rx_buffer[3]);
+
+    if (address == 0x01 && function == 0x06)
+    {
+        uint16_t value = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
+                        |  hex_pair_to_byte(rx_buffer[6], rx_buffer[7]);
+
+        if (value > 100) value = 100;
+        remember = value;
+        uint16_t duty = (remember * 699) / 100;
+
+        static uint8_t pwm_started = 0;
+        if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
+        __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
+    }
+
+    if (address == 0x01 && function == 0x03)
+    {
+        uint16_t reg_address = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
+                        |  hex_pair_to_byte(rx_buffer[6], rx_buffer[7]);
+
+        uint16_t quantity_field= (hex_pair_to_byte(rx_buffer[8], rx_buffer[9]) << 8)
+                        |  hex_pair_to_byte(rx_buffer[10], rx_buffer[11]);
+        uint8_t reply[32];
+        uint8_t pos = 0;
+
+        reply[pos++] = ':';
+
+        uint8_t high_address = (address >> 4) & 0x0F;   // top 4 bits
+        uint8_t low_address  = address & 0x0F;          // bottom 4 bits
+        reply[pos++] = hex_val_to_char(high_address);
+        reply[pos++] = hex_val_to_char(low_address);
+
+        uint8_t high_function = (function >> 4) & 0x0F;
+        uint8_t low_function = function & 0x0F;
+        reply[pos++] = hex_val_to_char(high_function);
+        reply[pos++] = hex_val_to_char(low_function);
+
+        uint8_t byte_count = 2;   // 2 data bytes will follow (one uint16_t register)
+        uint8_t high_bc = (byte_count >> 4) & 0x0F;
+        uint8_t low_bc  = byte_count & 0x0F;
+        reply[pos++] = hex_val_to_char(high_bc);
+        reply[pos++] = hex_val_to_char(low_bc);
+
+        uint16_t high_remember = (remember >> 8) & 0x0FF;
+        uint16_t high_remember_hi = (high_remember >> 4) & 0x0F;
+        uint16_t high_remember_lo = high_remember & 0x0F;
+        uint16_t low_remember = remember & 0x0FF;
+        uint16_t low_remember_hi = (low_remember >> 4) & 0x0F;
+        uint16_t low_remember_lo = low_remember & 0x0F;
+        reply[pos++] = hex_val_to_char(high_remember_hi);
+        reply[pos++] = hex_val_to_char(high_remember_lo);
+        reply[pos++] = hex_val_to_char(low_remember_hi);
+        reply[pos++] = hex_val_to_char(low_remember_lo);
+
+        reply[pos++] = '\r';
+        reply[pos++] = '\n';
+
+        HAL_UART_Transmit(&huart2,reply, pos, 1000);
+
+
+    }
 }
 
 /* USER CODE END 4 */
