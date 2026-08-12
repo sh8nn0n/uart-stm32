@@ -133,14 +133,15 @@ int main(void)
 		//find motor speed
 		static uint32_t last_check = 0;
 		uint32_t now = HAL_GetTick();
+		uint32_t elapsed = now-last_check;
 
-		if (now - last_check >= 1000)
+		if (elapsed)
 		{
 			uint32_t count = motor_count;
 			motor_count = 0;
 			last_check = now;
 
-			uint32_t rpm = (count * 60) / 6;
+			uint32_t rpm = ((count*60000)/elapsed) / 6;
 			const float pi = 3.14159f;
 			float speed = rpm * ((2.0f*pi)/60.0f);
 
@@ -150,8 +151,8 @@ int main(void)
 								(int)speed, (int)((speed - (int)speed) * 100));
 			HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, 1000);
 		}
-
 	  }
+
 
   }
 
