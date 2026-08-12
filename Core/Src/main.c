@@ -58,6 +58,7 @@ uint8_t received_LF = 0;
 uint8_t ready = 1;
 volatile uint32_t motor_count;
 uint16_t remember = 0;
+uint8_t msg_length = 0;
 
 
 /* USER CODE END PV */
@@ -401,6 +402,7 @@ void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 			if (byte == '\r')		//if \r is detected
 			{
 				rx_buffer[rx_index] = '\0';		//stores the null value to mark the end of the string
+				msg_length = rx_index;
 				rx_index = 0;					//reset the index
 				received_LF = 1;				//Received one of the LF, so look out for more
 				ready = 1;						//the ready state is set to true to run the while loop
@@ -447,7 +449,7 @@ uint8_t hex_val_to_char(uint8_t c)
 
 static void process_message(void)
 {
-    if (rx_index < 6) return;		//needs the register to be at least :address function
+    if (msg_length < 6) return;		//needs the register to be at least :address function
 
     uint8_t address  = hex_pair_to_byte(rx_buffer[0], rx_buffer[1]);
     uint8_t function = hex_pair_to_byte(rx_buffer[2], rx_buffer[3]);
@@ -479,22 +481,26 @@ static void process_message(void)
         uint8_t reply[32];
         //Position will be incrementally updated after each element is written into the buffer
         uint8_t pos = 0;
+        uint8_t LRC = 0;
 
         reply[pos++] = ':';
 
         //Write position of address to master so master knows it's the right one that it queried
         uint8_t high_address = (address >> 4) & 0x0F;   // top 4 bits of address
         uint8_t low_address  = address & 0x0F;          // bottom 4 bits of address
+        LRC = LRC + address;
         reply[pos++] = hex_val_to_char(high_address);
         reply[pos++] = hex_val_to_char(low_address);
 
         uint8_t high_function = (function >> 4) & 0x0F;
         uint8_t low_function = function & 0x0F;
+        LRC = LRC + function;
         reply[pos++] = hex_val_to_char(high_function);
         reply[pos++] = hex_val_to_char(low_function);
 
         //Tells master how many data bytes will follow so it knows when to stop reading for data
         uint8_t byte_count = 2;
+        LRC = LRC + byte_count;
         uint8_t high_bc = (byte_count >> 4) & 0x0F;
         uint8_t low_bc  = byte_count & 0x0F;
         reply[pos++] = hex_val_to_char(high_bc);
@@ -507,10 +513,17 @@ static void process_message(void)
         uint16_t low_remember = remember & 0x0FF;
         uint16_t low_remember_hi = (low_remember >> 4) & 0x0F;
         uint16_t low_remember_lo = low_remember & 0x0F;
+        LRC = LRC + high_remember + low_remember;
         reply[pos++] = hex_val_to_char(high_remember_hi);
         reply[pos++] = hex_val_to_char(high_remember_lo);
         reply[pos++] = hex_val_to_char(low_remember_hi);
         reply[pos++] = hex_val_to_char(low_remember_lo);
+
+        uint8_t lrc_comp = (~LRC) + 1;
+        uint8_t high_lrc_comp = (lrc_comp >> 4) & 0x0F;
+        uint8_t low_lrc_comp = lrc_comp & 0x0F;
+        reply[pos++] = hex_val_to_char(high_lrc_comp);
+        reply[pos++] = hex_val_to_char(low_lrc_comp);
 
         //Finish with \r\n
         reply[pos++] = '\r';
