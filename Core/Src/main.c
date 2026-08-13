@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,7 +33,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define MOTOR_PIN GPIO_PIN_5
+#define MOTOR_PORT GPIOB
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -43,29 +45,38 @@
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim16;
 
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_rx;
 DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
 uint8_t rx_byte;
-
 volatile uint8_t byte_ready = 0;
 uint8_t rx_buffer[32] = {0};
 uint8_t rx_index = 0;
-volatile uint8_t msg_ready = 0;
-
+uint8_t received_LF = 0;
+uint8_t ready = 1;
+volatile uint32_t motor_count;
+uint16_t remember = 0;
+uint8_t msg_length = 0;
+uint16_t target_rpm = 0;
+uint16_t Kp = 0;
+uint16_t Ki = 0;
 
 /* USER CODE END PV */
 
-/* Private function prototypes -----------------------------------------------*/
+/* Private function prototypes*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
-void process_modbus_message(void);
+static void process_message(void);
+uint8_t hex_pair_to_byte(uint8_t high, uint8_t low);
+uint8_t hex_val_to_char(uint8_t c);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -105,41 +116,73 @@ int main(void)
   MX_DMA_Init();
   MX_TIM16_Init();
   MX_USART2_UART_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-
   HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  if (ready)
+	  {
+		//calculate pwm speed
+		ready = 0;
+
+		process_message();
+
+		uint8_t newline[] = "\r\n";
+		HAL_UART_Transmit(&huart2, newline, 2, 1000);
+
+		//find motor speed
+		static uint32_t last_check = 0;
+		uint32_t now = HAL_GetTick();
+		uint32_t elapsed = now-last_check;
+
+		if (elapsed)
+		{
+			uint32_t count = motor_count;
+			motor_count = 0;
+			last_check = now;
+
+			uint32_t rpm = ((count*60000)/elapsed) / 6;
+
+			char msg[32];
+			int len = snprintf(msg, sizeof(msg), "RPM: %lu \r\n",
+								(unsigned long)rpm);
+
+			//find proportion term
+			uint32_t actual_rpm = rpm;
+			static uint16_t duty = 0;
+			int32_t error = (int32_t)target_rpm - (int32_t)actual_rpm;
+			int32_t P_term = Kp*error;
+
+			//find integral term
+			static int32_t integral = 0;
+			integral = integral + (error*(int32_t)elapsed);
+			int32_t I_term = Ki*integral;
+
+	        //clamp input to 0-699
+			int32_t new_duty = duty + P_term + I_term;
+			if (new_duty > 699) new_duty = 699;
+			if (new_duty < 0) new_duty = 0;
+			duty = (uint16_t)new_duty;		//turn everything back to unsigned
+
+		   static uint8_t pwm_started = 0;
+		   if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
+		   __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
+			HAL_UART_Transmit(&huart1, (uint8_t*)msg, len, 1000);
+		}
+	  }
+
+
+  }
+
     /* USER CODE END WHILE */
 
-	  if(byte_ready){
-			byte_ready = 0;
-		if (rx_byte == ':'){
-			rx_index = 0;
-		}
-		else if (rx_byte == '\r')
-			{
-				msg_ready = 1;
-			}
-		else if (rx_index < sizeof (rx_buffer)-1)
-		{
-			rx_buffer[rx_index++] = rx_byte;
-		}
-
-	  }
-	  if (msg_ready){
-		  msg_ready = 0;
-		  process_modbus_message();
-		  rx_index = 0;
-	  }
-
     /* USER CODE BEGIN 3 */
-  }
+
   /* USER CODE END 3 */
 }
 
@@ -252,6 +295,54 @@ static void MX_TIM16_Init(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -331,12 +422,23 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin : PA5 */
   GPIO_InitStruct.Pin = GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -381,13 +483,235 @@ void process_modbus_message(void)
 void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
 	{
-		byte_ready = 1;
-		HAL_UART_Transmit (&huart2, &rx_byte, 1, 1000);
-		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
+		uint8_t byte = rx_byte;		//copy the newly stored rx_byte into a local variable to store
+
+		//HAL_UART_Transmit(&huart2, &rx_byte, 1, 1000);		//echo the transmit
+		if (byte == ':')
+		{
+			rx_index = 0;
+		    HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
+			return;
+		}
+		byte_ready = 1;			//sets if statement to true
+		if (byte_ready)
+		{
+			if (received_LF)	//check if \n is received
+			{
+			  received_LF = 0;
+			  if (byte == '\n')
+				{
+				  HAL_UART_Receive_IT(&huart2, &rx_byte, 1);		//swallowed the \n which means there's no more data to store
+				  return;			//ignores the rest of the callback and go back to while loop
+				}
+			}
+			if (byte == '\r')		//if \r is detected
+			{
+				rx_buffer[rx_index] = '\0';		//stores the null value to mark the end of the string
+				msg_length = rx_index;
+				rx_index = 0;					//reset the index
+				received_LF = 1;				//Received one of the LF, so look out for more
+				ready = 1;						//the ready state is set to true to run the while loop
+			}
+			else if (rx_index < sizeof(rx_buffer) - 1)	//keep storing the bytes
+			{
+				rx_buffer[rx_index++] = byte;   //accumulates what you're typing
+			}
+		}
+
 	}
+		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);		//rearms UART for next byte
 }
 
 
+void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
+{
+  if(GPIO_Pin == MOTOR_PIN)
+  {
+	  motor_count++;			//accumulates motor speed count based on rpm
+  }
+
+}
+
+
+//definitions for hexadecimal
+uint8_t hex_char_to_val(uint8_t c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+uint8_t hex_pair_to_byte(uint8_t high, uint8_t low)
+{
+    return (hex_char_to_val(high) << 4) | hex_char_to_val(low);
+}
+
+uint8_t hex_val_to_char(uint8_t c)
+{
+	if (c >= 0 && c <= 9) return c + '0';
+	if (c >= 10 && c <= 15) return c + 'A' - 10;
+    return 0;
+}
+
+static void process_message(void)
+{
+    if (msg_length < 12) return;		//needs the register to be complete, or else the function won't run
+
+    uint8_t address  = hex_pair_to_byte(rx_buffer[0], rx_buffer[1]);
+    uint8_t function = hex_pair_to_byte(rx_buffer[2], rx_buffer[3]);
+
+    uint8_t LRC = 0;
+
+    if (address == 0x01 && function == 0x06)
+    {
+
+
+        uint16_t reg_address = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
+                        |  hex_pair_to_byte(rx_buffer[6], rx_buffer[7]);
+
+        uint16_t value = (hex_pair_to_byte(rx_buffer[8], rx_buffer[9]) << 8)
+                                |  hex_pair_to_byte(rx_buffer[10], rx_buffer[11]);
+
+        if (reg_address == 0x0000)
+        {
+        	target_rpm = value;
+        }
+        if (reg_address == 0x0001)
+        {
+        	Kp = value;
+        }
+        if (reg_address == 0x0002)
+        {
+        	Ki = value;
+        }
+
+        //Buffer for outgoing reply
+		uint8_t reply[32];
+		//Position will be incrementally updated after each element is written into the buffer
+		uint8_t pos = 0;
+		uint8_t LRC = 0;
+
+        reply[pos++] = ':';
+
+		//Write position of address to master so master knows it's the right one that it queried
+		uint8_t high_address = (address >> 4) & 0x0F;   // top 4 bits of address
+		uint8_t low_address  = address & 0x0F;          // bottom 4 bits of address
+		LRC = LRC + address;
+		reply[pos++] = hex_val_to_char(high_address);
+		reply[pos++] = hex_val_to_char(low_address);
+
+		uint8_t high_function = (function >> 4) & 0x0F;
+		uint8_t low_function = function & 0x0F;
+		LRC = LRC + function;
+		reply[pos++] = hex_val_to_char(high_function);
+		reply[pos++] = hex_val_to_char(low_function);
+
+		//Write position of register address (2 bytes, 16 bits)
+		uint16_t high_reg = (reg_address >> 8) & 0x0FF;		//split data into 8 and 8
+		uint16_t high_reg_hi = (high_reg >> 4) & 0x0F;	//split high bit in half again
+		uint16_t high_reg_lo = high_reg & 0x0F;
+		uint16_t low_reg = reg_address & 0x0FF;
+		uint16_t low_reg_hi = (low_reg >> 4) & 0x0F;
+		uint16_t low_reg_lo = low_reg & 0x0F;
+		LRC = LRC + high_reg + low_reg;
+		reply[pos++] = hex_val_to_char(high_reg_hi);
+		reply[pos++] = hex_val_to_char(high_reg_lo);
+		reply[pos++] = hex_val_to_char(low_reg_hi);
+		reply[pos++] = hex_val_to_char(low_reg_lo);
+
+		//Write position of value (2 bytes, 16 bits)
+		uint16_t high_val = (value >> 8) & 0x0FF;		//split data into 8 and 8
+		uint16_t high_val_hi = (high_val >> 4) & 0x0F;	//split high bit in half again
+		uint16_t high_val_lo = high_val & 0x0F;
+		uint16_t low_val = value & 0x0FF;
+		uint16_t low_val_hi = (low_val >> 4) & 0x0F;
+		uint16_t low_val_lo = low_val & 0x0F;
+		LRC = LRC + high_val + low_val;
+		reply[pos++] = hex_val_to_char(high_val_hi);
+		reply[pos++] = hex_val_to_char(high_val_lo);
+		reply[pos++] = hex_val_to_char(low_val_hi);
+		reply[pos++] = hex_val_to_char(low_val_lo);
+
+		//Handle LRC (2's complement)
+		uint8_t lrc_comp = (~LRC) + 1;
+		uint8_t high_lrc_comp = (lrc_comp >> 4) & 0x0F;
+		uint8_t low_lrc_comp = lrc_comp & 0x0F;
+		reply[pos++] = hex_val_to_char(high_lrc_comp);
+		reply[pos++] = hex_val_to_char(low_lrc_comp);
+
+		//Finish with \r\n
+		reply[pos++] = '\r';
+		reply[pos++] = '\n';
+
+		//Transmit it back to console
+		HAL_UART_Transmit(&huart2,reply, pos, 1000);
+
+    }
+
+    if (address == 0x01 && function == 0x03)
+    {
+        /*uint16_t reg_address = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
+                        |  hex_pair_to_byte(rx_buffer[6], rx_buffer[7]);
+
+        uint16_t quantity_field= (hex_pair_to_byte(rx_buffer[8], rx_buffer[9]) << 8)
+                        |  hex_pair_to_byte(rx_buffer[10], rx_buffer[11]); */
+
+        //Buffer for outgoing reply
+        uint8_t reply[32];
+        //Position will be incrementally updated after each element is written into the buffer
+        uint8_t pos = 0;
+
+        reply[pos++] = ':';
+
+        //Write position of address to master so master knows it's the right one that it queried
+        uint8_t high_address = (address >> 4) & 0x0F;   // top 4 bits of address
+        uint8_t low_address  = address & 0x0F;          // bottom 4 bits of address
+        LRC = LRC + address;
+        reply[pos++] = hex_val_to_char(high_address);
+        reply[pos++] = hex_val_to_char(low_address);
+
+        uint8_t high_function = (function >> 4) & 0x0F;
+        uint8_t low_function = function & 0x0F;
+        LRC = LRC + function;
+        reply[pos++] = hex_val_to_char(high_function);
+        reply[pos++] = hex_val_to_char(low_function);
+
+        //Tells master how many data bytes will follow so it knows when to stop reading for data
+        uint8_t byte_count = 2;
+        LRC = LRC + byte_count;
+        uint8_t high_bc = (byte_count >> 4) & 0x0F;
+        uint8_t low_bc  = byte_count & 0x0F;
+        reply[pos++] = hex_val_to_char(high_bc);
+        reply[pos++] = hex_val_to_char(low_bc);
+
+        //Write position of data (2 bytes, 16 bits)
+        uint16_t high_remember = (remember >> 8) & 0x0FF;		//split data into 8 and 8
+        uint16_t high_remember_hi = (high_remember >> 4) & 0x0F;	//split high bit in half again
+        uint16_t high_remember_lo = high_remember & 0x0F;
+        uint16_t low_remember = remember & 0x0FF;
+        uint16_t low_remember_hi = (low_remember >> 4) & 0x0F;
+        uint16_t low_remember_lo = low_remember & 0x0F;
+        LRC = LRC + high_remember + low_remember;
+        reply[pos++] = hex_val_to_char(high_remember_hi);
+        reply[pos++] = hex_val_to_char(high_remember_lo);
+        reply[pos++] = hex_val_to_char(low_remember_hi);
+        reply[pos++] = hex_val_to_char(low_remember_lo);
+
+        uint8_t lrc_comp = (~LRC) + 1;
+        uint8_t high_lrc_comp = (lrc_comp >> 4) & 0x0F;
+        uint8_t low_lrc_comp = lrc_comp & 0x0F;
+        reply[pos++] = hex_val_to_char(high_lrc_comp);
+        reply[pos++] = hex_val_to_char(low_lrc_comp);
+
+        //Finish with \r\n
+        reply[pos++] = '\r';
+        reply[pos++] = '\n';
+
+        //Transmit it back to console
+        HAL_UART_Transmit(&huart2,reply, pos, 1000);
+
+    }
+}
 
 /* USER CODE END 4 */
 
