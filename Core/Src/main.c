@@ -66,7 +66,7 @@ uint16_t Ki = 0;
 
 /* USER CODE END PV */
 
-/* Private function prototypes -----------------------------------------------*/
+/* Private function prototypes*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
@@ -447,6 +447,39 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+uint8_t hex_char_to_val(uint8_t c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+uint8_t hex_pair_to_byte(uint8_t high, uint8_t low)
+{
+    return (hex_char_to_val(high) << 4) | hex_char_to_val(low);
+}
+
+void process_modbus_message(void)
+{
+    if (rx_index < 6) return;
+
+    uint8_t address  = hex_pair_to_byte(rx_buffer[0], rx_buffer[1]);
+    uint8_t function = hex_pair_to_byte(rx_buffer[2], rx_buffer[3]);
+
+    if (address == 0x01 && function == 0x06)
+    {
+        uint16_t value = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
+                        |  hex_pair_to_byte(rx_buffer[6], rx_buffer[7]);
+
+        if (value > 100) value = 100;
+        uint16_t duty = (value * 699) / 100;
+
+        static uint8_t pwm_started = 0;
+        if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
+        __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
+    }
+}
+
 void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
 	{
@@ -484,6 +517,7 @@ void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 				rx_buffer[rx_index++] = byte;   //accumulates what you're typing
 			}
 		}
+
 	}
 		HAL_UART_Receive_IT(&huart2, &rx_byte, 1);		//rearms UART for next byte
 }
