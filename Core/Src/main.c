@@ -151,16 +151,23 @@ int main(void)
 			char msg[32];
 			int len = snprintf(msg, sizeof(msg), "RPM: %lu \r\n",
 								(unsigned long)rpm);
-			uint32_t actual_rpm = rpm;
-			int32_t error = (int32_t)target_rpm - (int32_t)actual_rpm;
 
+			//find proportion term
+			uint32_t actual_rpm = rpm;
 			static uint16_t duty = 0;
+			int32_t error = (int32_t)target_rpm - (int32_t)actual_rpm;
 			int32_t P_term = Kp*error;
+
+			//find integral term
+			static int32_t integral = 0;
+			integral = integral + (error*(int32_t)elapsed);
+			int32_t I_term = Ki*integral;
+
 	        //clamp input to 0-699
-			int16_t new_duty = duty + P_term;
+			int32_t new_duty = duty + P_term + I_term;
 			if (new_duty > 699) new_duty = 699;
 			if (new_duty < 0) new_duty = 0;
-			duty = (uint16_t)new_duty;
+			duty = (uint16_t)new_duty;		//turn everything back to unsigned
 
 		   static uint8_t pwm_started = 0;
 		   if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
