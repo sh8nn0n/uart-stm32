@@ -163,7 +163,7 @@ int main(void)
 			static int32_t integral = 0;
 			integral = integral + (error*(int32_t)elapsed);
 			if (integral > 600) integral = 600;
-			if (integral < -600) integral = 600;
+			if (integral < -600) integral = -600;
 			int32_t I_term = Ki*integral;
 
 			//find derivative term
@@ -541,8 +541,6 @@ static void process_message(void)
 
     if (address == 0x01 && function == 0x06)
     {
-
-
         uint16_t reg_address = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
                         |  hex_pair_to_byte(rx_buffer[6], rx_buffer[7]);
 
@@ -553,15 +551,15 @@ static void process_message(void)
         {
         	target_rpm = value;
         }
-        if (reg_address == 0x0001)
+        else if (reg_address == 0x0001)
         {
         	Kp = value;
         }
-        if (reg_address == 0x0002)
+        else if (reg_address == 0x0002)
         {
         	Ki = value;
         }
-        if (reg_address == 0x0003)
+        else if (reg_address == 0x0003)
         {
         	Kd = value;
         }
@@ -570,7 +568,6 @@ static void process_message(void)
 		uint8_t reply[32];
 		//Position will be incrementally updated after each element is written into the buffer
 		uint8_t pos = 0;
-		uint8_t LRC = 0;
 
         reply[pos++] = ':';
 
@@ -631,11 +628,16 @@ static void process_message(void)
 
     if (address == 0x01 && function == 0x03)
     {
-        /*uint16_t reg_address = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
+        uint16_t reg_address = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
                         |  hex_pair_to_byte(rx_buffer[6], rx_buffer[7]);
+        uint16_t data_to_send;
 
-        uint16_t quantity_field= (hex_pair_to_byte(rx_buffer[8], rx_buffer[9]) << 8)
-                        |  hex_pair_to_byte(rx_buffer[10], rx_buffer[11]); */
+        if (reg_address == 0x0000) data_to_send = target_rpm;
+        else if (reg_address == 0x0001) data_to_send = Kp;
+        else if (reg_address == 0x0002) data_to_send = Ki;
+        else if (reg_address == 0x0003) data_to_send = Kd;
+        else data_to_send = 0;
+
 
         //Buffer for outgoing reply
         uint8_t reply[32];
@@ -666,10 +668,10 @@ static void process_message(void)
         reply[pos++] = hex_val_to_char(low_bc);
 
         //Write position of data (2 bytes, 16 bits)
-        uint16_t high_remember = (remember >> 8) & 0x0FF;		//split data into 8 and 8
+        uint16_t high_remember = (data_to_send >> 8) & 0x0FF;		//split data into 8 and 8
         uint16_t high_remember_hi = (high_remember >> 4) & 0x0F;	//split high bit in half again
         uint16_t high_remember_lo = high_remember & 0x0F;
-        uint16_t low_remember = remember & 0x0FF;
+        uint16_t low_remember = data_to_send & 0x0FF;
         uint16_t low_remember_hi = (low_remember >> 4) & 0x0F;
         uint16_t low_remember_lo = low_remember & 0x0F;
         LRC = LRC + high_remember + low_remember;

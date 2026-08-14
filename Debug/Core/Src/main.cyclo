@@ -10,5 +10,5 @@
 ../Core/Src/main.c:514:9:hex_char_to_val	5
 ../Core/Src/main.c:521:9:hex_pair_to_byte	1
 ../Core/Src/main.c:526:9:hex_val_to_char	4
-../Core/Src/main.c:533:13:process_message	10
-../Core/Src/main.c:703:6:Error_Handler	1
+../Core/Src/main.c:533:13:process_message	14
+../Core/Src/main.c:705:6:Error_Handler	1

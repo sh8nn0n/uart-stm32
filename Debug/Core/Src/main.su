@@ -11,4 +11,4 @@
 ../Core/Src/main.c:521:9:hex_pair_to_byte	24	static
 ../Core/Src/main.c:526:9:hex_val_to_char	16	static
 ../Core/Src/main.c:533:13:process_message	128	static
-../Core/Src/main.c:703:6:Error_Handler	8	static,ignoring_inline_asm
+../Core/Src/main.c:705:6:Error_Handler	8	static,ignoring_inline_asm
