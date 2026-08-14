@@ -63,6 +63,7 @@ uint8_t msg_length = 0;
 uint16_t target_rpm = 0;
 uint16_t Kp = 0;
 uint16_t Ki = 0;
+uint16_t Kd = 0;
 
 /* USER CODE END PV */
 
@@ -140,7 +141,7 @@ int main(void)
 		uint32_t now = HAL_GetTick();
 		uint32_t elapsed = now-last_check;
 
-		if (elapsed)
+		if (elapsed > 0)
 		{
 			uint32_t count = motor_count;
 			motor_count = 0;
@@ -161,10 +162,20 @@ int main(void)
 			//find integral term
 			static int32_t integral = 0;
 			integral = integral + (error*(int32_t)elapsed);
+			if (integral > 600) integral = 600;
+			if (integral < -600) integral = 600;
 			int32_t I_term = Ki*integral;
 
+			//find derivative term
+			static int32_t derivative = 0;
+			static int32_t previous_error = 0;
+			derivative = ((error-previous_error)/(int32_t)elapsed);
+			int32_t D_term = Kd*derivative;
+
+			previous_error = error;
+
 	        //clamp input to 0-699
-			int32_t new_duty = duty + P_term + I_term;
+			int32_t new_duty = duty + P_term + I_term + D_term;
 			if (new_duty > 699) new_duty = 699;
 			if (new_duty < 0) new_duty = 0;
 			duty = (uint16_t)new_duty;		//turn everything back to unsigned
@@ -446,40 +457,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-uint8_t hex_char_to_val(uint8_t c)
-{
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return 0;
-}
-
-uint8_t hex_pair_to_byte(uint8_t high, uint8_t low)
-{
-    return (hex_char_to_val(high) << 4) | hex_char_to_val(low);
-}
-
-void process_modbus_message(void)
-{
-    if (rx_index < 6) return;
-
-    uint8_t address  = hex_pair_to_byte(rx_buffer[0], rx_buffer[1]);
-    uint8_t function = hex_pair_to_byte(rx_buffer[2], rx_buffer[3]);
-
-    if (address == 0x01 && function == 0x06)
-    {
-        uint16_t value = (hex_pair_to_byte(rx_buffer[4], rx_buffer[5]) << 8)
-                        |  hex_pair_to_byte(rx_buffer[6], rx_buffer[7]);
-
-        if (value > 100) value = 100;
-        uint16_t duty = (value * 699) / 100;
-
-        static uint8_t pwm_started = 0;
-        if (!pwm_started) { HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1); pwm_started = 1; }
-        __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, duty);
-    }
-}
-
 void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
 	if (huart -> Instance == USART2)
 	{
@@ -583,6 +560,10 @@ static void process_message(void)
         if (reg_address == 0x0002)
         {
         	Ki = value;
+        }
+        if (reg_address == 0x0003)
+        {
+        	Kd = value;
         }
 
         //Buffer for outgoing reply
